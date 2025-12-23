@@ -139,53 +139,9 @@ function getStaticContent(canton, mode) {
     return [];
 }
 
-// ==================== CAROUSEL LOGIC ====================
-function updateCarousel() {
-    const track = document.querySelector('.carousel-track');
-    if (!track || !track.children.length) return;
-
-    const firstItem = track.children[0];
-    const style = window.getComputedStyle(track);
-    const gap = parseFloat(style.gap) || 30;
-    let itemWidth = firstItem.offsetWidth + gap;
-
-    // Reliability Fallback: If 0 or very small (unrendered canvas), use default
-    if (itemWidth < 100) itemWidth = 430;
-
-    track.style.transform = `translateX(-${currentIndex * itemWidth}px)`;
-
-    // Infinite loop logic - handle wrapping
-    const realItemCount = parseInt(carousel.dataset.realItemCount) || 0;
-    const cloneCount = parseInt(carousel.dataset.cloneCount) || 0;
-
-    if (realItemCount > 0) {
-        // Check if we're at a clone and need to wrap
-        setTimeout(() => {
-            const track = document.querySelector('.carousel-track');
-            if (!track) return;
-
-            // If scrolled to last clone (past all real items), jump to first real
-            if (currentIndex >= cloneCount + realItemCount) {
-                track.style.transition = 'none';
-                currentIndex = cloneCount + (currentIndex - cloneCount - realItemCount);
-                track.style.transform = `translateX(-${currentIndex * itemWidth}px)`;
-                // Re-enable transition after jump
-                setTimeout(() => {
-                    track.style.transition = '';
-                }, 50);
-            }
-            // If scrolled to first clone (before all real items), jump to last real
-            else if (currentIndex < cloneCount) {
-                track.style.transition = 'none';
-                currentIndex = cloneCount + realItemCount + (currentIndex - cloneCount);
-                track.style.transform = `translateX(-${currentIndex * itemWidth}px)`;
-                // Re-enable transition after jump
-                setTimeout(() => {
-                    track.style.transition = '';
-                }, 50);
-            }
-        }, 350); // Wait for transition to complete (300ms + margin)
-    }
+// ==================== CAROUSEL UTILS ====================
+function stopCarousel() {
+    stopAutoScroll();
 }
 
 // ==================== HELPER FUNCTIONS ====================
@@ -361,76 +317,73 @@ function openCantonDetails(cantonName) {
 }
 
 // ==================== CONTENT MANAGEMENT ====================
-function loadCarouselContent(scrollToEnd = false) {
-    carousel.innerHTML = '';
+// ==================== CAROUSEL LOGIC ====================
+let autoScrollTimer = null;
+let isTransitioning = false;
 
-    const cantonName = state.currentCanton || 'Luxembourg';
-    // Get static content instead of fetching from API
-    const itemsList = getStaticContent(cantonName, state.currentMode);
-    console.log('Loaded Static Items:', itemsList);
-
-    if (itemsList.length === 0) {
-        carousel.innerHTML = '<div style="width:100%; height:100%; display:flex; justify-content:center; align-items:center; color:rgba(255,255,255,0.5); font-size:1.5rem;">Aucun contenu.</div>';
-        return;
+function stopAutoScroll() {
+    if (autoScrollTimer) {
+        clearInterval(autoScrollTimer);
+        autoScrollTimer = null;
     }
+}
 
-    const track = document.createElement('div');
-    track.className = 'carousel-track';
-
-    // For infinite loop: clone last 3 items at start, first 3 items at end
-    const cloneCount = Math.min(3, itemsList.length);
-
-    // Clone last items and prepend
-    for (let i = itemsList.length - cloneCount; i < itemsList.length; i++) {
-        const clonedItem = createCarouselItem(itemsList[i], i, cantonName);
-        clonedItem.dataset.clone = 'true';
-        clonedItem.dataset.realIndex = i;
-        track.appendChild(clonedItem);
-    }
-
-    // Add real items
-    itemsList.forEach((data, i) => {
-        const item = createCarouselItem(data, i, cantonName);
-        item.dataset.realIndex = i;
-        track.appendChild(item);
-    });
-
-    // Clone first items and append
-    for (let i = 0; i < cloneCount; i++) {
-        const clonedItem = createCarouselItem(itemsList[i], i, cantonName);
-        clonedItem.dataset.clone = 'true';
-        clonedItem.dataset.realIndex = i;
-        track.appendChild(clonedItem);
-    }
-
-    carousel.appendChild(track);
-
-    // Store total count for infinite loop calculations
-    carousel.dataset.realItemCount = itemsList.length;
-    carousel.dataset.cloneCount = cloneCount;
-
-    // Initial positioning - start at first real item (after prepended clones)
-    if (scrollToEnd && itemsList.length > 0) {
-        setTimeout(() => {
-            const track = document.querySelector('.carousel-track');
-            if (!track || !track.children.length) return;
-
-            const containerWidth = carousel.offsetWidth;
-            const firstItem = track.children[0];
-            const gap = 30;
-            const itemWidth = firstItem.offsetWidth + gap;
-
-            const visibleItems = Math.floor(containerWidth / itemWidth);
-            const totalItems = itemsList.length;
-            const cloneCount = parseInt(carousel.dataset.cloneCount);
-
-            currentIndex = cloneCount + Math.max(0, totalItems - visibleItems);
+function startAutoScroll() {
+    stopAutoScroll();
+    autoScrollTimer = setInterval(() => {
+        if (!isTransitioning) {
+            currentIndex++;
             updateCarousel();
-            console.log('Scrolled to end. Index:', currentIndex);
-        }, 100);
+        }
+    }, 4000); // 4 seconds interval
+}
+
+function updateCarousel(enableTransition = true) {
+    const track = document.querySelector('.carousel-track');
+    if (!track || !track.children.length) return;
+
+    const items = Array.from(track.children);
+    const firstItem = items[0];
+    const style = window.getComputedStyle(track);
+    const gap = parseFloat(style.gap) || 30;
+    const itemWidth = firstItem.offsetWidth + gap;
+    const containerWidth = carousel.offsetWidth;
+
+    // Centering Math
+    const centerOffset = (containerWidth / 2) - (firstItem.offsetWidth / 2);
+    const translateVal = centerOffset - (currentIndex * itemWidth);
+
+    if (enableTransition) {
+        track.style.transition = 'transform 0.5s cubic-bezier(0.25, 1, 0.5, 1)';
+        isTransitioning = true;
     } else {
-        currentIndex = cloneCount; // Start at first real item
-        updateCarousel();
+        track.style.transition = 'none';
+        isTransitioning = false;
+    }
+
+    track.style.transform = `translateX(${translateVal}px)`;
+}
+
+// Handle Infinite Loop Jumps after transition
+function handleTransitionEnd() {
+    const track = document.querySelector('.carousel-track');
+    if (!track) return;
+
+    isTransitioning = false;
+
+    const totalReal = parseInt(carousel.dataset.realItemCount);
+    const bufferSize = parseInt(carousel.dataset.bufferSize);
+
+    // If we are in the "After" clones (Right side)
+    if (currentIndex >= totalReal + bufferSize) {
+        currentIndex = bufferSize + (currentIndex % totalReal); // Map back to real range
+        updateCarousel(false); // Jump instantly
+    }
+    // If we are in the "Before" clones (Left side)
+    else if (currentIndex < bufferSize) {
+        // Map back to end
+        currentIndex += totalReal;
+        updateCarousel(false); // Jump instantly
     }
 }
 
@@ -438,11 +391,12 @@ function createCarouselItem(itemData, index, cantonName) {
     const item = document.createElement('div');
     item.className = 'carousel-item';
     item.dataset.id = itemData.id;
-    item.id = `carousel-item-${index}`;
+    // We'll trust the logic doesn't require unique ID selection for now 
+    item.id = `carousel-item-${index}-${Math.random().toString(36).substr(2, 5)}`;
 
     // ARIA attributes for accessibility
     item.setAttribute('role', 'listitem');
-    item.setAttribute('aria-label', `Media item ${index + 1}`);
+    item.setAttribute('aria-label', 'Media item');
 
     const contentDiv = document.createElement('div');
     Object.assign(contentDiv.style, {
@@ -452,7 +406,7 @@ function createCarouselItem(itemData, index, cantonName) {
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
-        background: '#444' // Placeholder background
+        background: '#444'
     });
 
     if (itemData.isImage) {
@@ -467,19 +421,19 @@ function createCarouselItem(itemData, index, cantonName) {
     } else if (itemData.isVideo) {
         contentDiv.innerHTML = '<div style="width:100%;height:100%;display:flex;justify-content:center;align-items:center;background:#000;color:white;"><span style="font-size:4rem;">▶️</span></div>';
     } else {
-        console.warn('Unknown item type:', itemData);
-        contentDiv.innerHTML = `<div style="color:red;padding:20px;">Unknown Type. ID: ${itemData.id}<br>Type: ${itemData.isPdf ? 'PDF' : itemData.isImage ? 'Image' : '?'}</div>`;
+        contentDiv.innerHTML = `<div style="color:red;padding:20px;">Unknown Type</div>`;
     }
 
     item.appendChild(contentDiv);
 
-    // Track if click was actually a swipe
+    // Track click vs swipe
     let itemClickStartX = 0;
     let itemClickStartY = 0;
 
     item.addEventListener('mousedown', (e) => {
         itemClickStartX = e.clientX;
         itemClickStartY = e.clientY;
+        stopAutoScroll(); // Stop auto scroll on interaction
     });
 
     item.addEventListener('touchstart', (e) => {
@@ -487,81 +441,108 @@ function createCarouselItem(itemData, index, cantonName) {
             itemClickStartX = e.touches[0].clientX;
             itemClickStartY = e.touches[0].clientY;
         }
+        stopAutoScroll();
     }, { passive: true });
 
     item.addEventListener('click', (e) => {
-        // Check if this was a swipe/drag rather than a click
         const deltaX = Math.abs(e.clientX - itemClickStartX);
         const deltaY = Math.abs(e.clientY - itemClickStartY);
 
-        // Only open modal if movement was minimal (< 10px)
         if (deltaX < 10 && deltaY < 10) {
-            console.log('Item Clicked. ID:', itemData.id, 'Src:', itemData.src);
             openModalWithData(itemData);
         }
+        // Resume auto scroll? Maybe wait for mouseleave?
     });
 
     return item;
 }
 
+function loadCarouselContent(scrollToEnd = false) {
+    stopCarousel();
+    carousel.innerHTML = '';
+
+    const cantonName = state.currentCanton || 'Luxembourg';
+    let itemsList = getStaticContent(cantonName, state.currentMode);
+
+    if (itemsList.length === 0) {
+        carousel.innerHTML = '<div style="width:100%; height:100%; display:flex; justify-content:center; align-items:center; color:rgba(255,255,255,0.5); font-size:1.5rem;">Aucun contenu.</div>';
+        return;
+    }
+
+    // ROBUST INFINITE LOOP STRATEGY
+    let renderList = [...itemsList];
+    while (renderList.length < 5) {
+        renderList = [...renderList, ...itemsList];
+    }
+
+    const track = document.createElement('div');
+    track.className = 'carousel-track';
+
+    const bufferSize = 8;
+    const beforeClones = renderList.slice(-bufferSize);
+    const afterClones = renderList.slice(0, bufferSize);
+
+    // Combine
+    const fullRenderSet = [...beforeClones, ...renderList, ...afterClones];
+
+    fullRenderSet.forEach((data, i) => {
+        const item = createCarouselItem(data, i, cantonName);
+        track.appendChild(item);
+    });
+
+    carousel.appendChild(track);
+
+    carousel.dataset.realItemCount = renderList.length;
+    carousel.dataset.bufferSize = bufferSize;
+
+    // Start at first Real item
+    currentIndex = bufferSize;
+
+    setTimeout(() => {
+        updateCarousel(false);
+        track.addEventListener('transitionend', handleTransitionEnd);
+        startAutoScroll();
+    }, 50);
+}
+
 function setupContentManager() {
-    // Direct Event Listeners for Arrows
+    // Buttons
     const btnPrev = document.querySelector('.carousel-nav-btn.prev');
     const btnNext = document.querySelector('.carousel-nav-btn.next');
 
-    // Use direct onclick assignment for robustness
+    const handleNext = (e) => {
+        e.preventDefault(); e.stopPropagation();
+        stopAutoScroll();
+        currentIndex++;
+        updateCarousel();
+        startAutoScroll(); // Restart timer
+    };
+
+    const handlePrev = (e) => {
+        e.preventDefault(); e.stopPropagation();
+        stopAutoScroll();
+        currentIndex--;
+        updateCarousel();
+        startAutoScroll();
+    };
+
     if (btnPrev) {
-        btnPrev.onclick = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            // Infinite loop: always allow prev
-            currentIndex--;
-            updateCarousel();
-        };
-        btnPrev.ontouchend = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            // Infinite loop: always allow prev
-            currentIndex--;
-            updateCarousel();
-        };
+        btnPrev.onclick = handlePrev;
+        btnPrev.ontouchend = handlePrev;
     }
-
     if (btnNext) {
-        btnNext.onclick = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-
-            const track = document.querySelector('.carousel-track');
-            if (!track || !track.children.length) return;
-
-            // Infinite loop: always allow next
-            currentIndex++;
-            updateCarousel();
-        };
-
-        btnNext.ontouchend = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-
-            const track = document.querySelector('.carousel-track');
-            if (!track || !track.children.length) return;
-
-            // Infinite loop: always allow next
-            currentIndex++;
-            updateCarousel();
-        };
+        btnNext.onclick = handleNext;
+        btnNext.ontouchend = handleNext;
     }
 
-    // ==================== SWIPE NAVIGATION ====================
+    // Swipe
     let swipeStartX = 0;
     let swipeStartY = 0;
     let isDragging = false;
 
     const handleSwipeStart = (e) => {
-        // For mouse events, only accept left-click (0) or right-click (2)
         if (e.type === 'mousedown' && e.button !== 0 && e.button !== 2) return;
-
+        stopAutoScroll();
         const touch = e.touches ? e.touches[0] : e;
         swipeStartX = touch.clientX;
         swipeStartY = touch.clientY;
@@ -570,7 +551,6 @@ function setupContentManager() {
 
     const handleSwipeMove = (e) => {
         if (!isDragging) return;
-        // Prevent default to avoid scrolling while swiping
         if (e.cancelable) e.preventDefault();
     };
 
@@ -579,65 +559,41 @@ function setupContentManager() {
         isDragging = false;
 
         const touch = e.changedTouches ? e.changedTouches[0] : e;
-        const swipeEndX = touch.clientX;
-        const swipeEndY = touch.clientY;
+        const deltaX = touch.clientX - swipeStartX;
+        const deltaY = touch.clientY - swipeStartY;
 
-        const deltaX = swipeEndX - swipeStartX;
-        const deltaY = swipeEndY - swipeStartY;
-
-        // Only trigger if horizontal swipe is dominant and exceeds threshold
         if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
-            if (deltaX > 0) {
-                // Swiped right - go to previous (infinite)
-                currentIndex--;
-                updateCarousel();
-            } else {
-                // Swiped left - go to next (infinite)
-                currentIndex++;
-                updateCarousel();
-            }
+            if (deltaX > 0) currentIndex--;
+            else currentIndex++;
+            updateCarousel();
         }
+        startAutoScroll();
     };
 
-    // Attach swipe listeners to carousel
     if (carousel) {
-        // Touch events
         carousel.addEventListener('touchstart', handleSwipeStart, { passive: true });
         carousel.addEventListener('touchmove', handleSwipeMove, { passive: false });
         carousel.addEventListener('touchend', handleSwipeEnd, { passive: true });
 
-        // Mouse events for desktop drag (left and right click)
         carousel.addEventListener('mousedown', handleSwipeStart);
         carousel.addEventListener('mousemove', handleSwipeMove);
         carousel.addEventListener('mouseup', handleSwipeEnd);
-        carousel.addEventListener('mouseleave', () => { isDragging = false; });
-
-        // Prevent context menu when right-click dragging
-        carousel.addEventListener('contextmenu', (e) => {
-            if (isDragging) {
-                e.preventDefault();
-            }
+        carousel.addEventListener('mouseleave', () => {
+            isDragging = false;
+            startAutoScroll();
         });
     }
 
-    // Resize listener to keep alignment
-    window.addEventListener('resize', updateCarousel);
+    // Resize listener
+    window.addEventListener('resize', () => updateCarousel(false));
 
-    // ==================== KEYBOARD NAVIGATION ====================
+    // Keyboard
     document.addEventListener('keydown', (e) => {
-        // Only handle arrow keys when carousel view is active
         if (!views.details.classList.contains('active')) return;
-
         if (e.key === 'ArrowLeft') {
-            e.preventDefault();
-            // Navigate to previous (infinite)
-            currentIndex--;
-            updateCarousel();
+            stopAutoScroll(); currentIndex--; updateCarousel(); startAutoScroll();
         } else if (e.key === 'ArrowRight') {
-            e.preventDefault();
-            // Navigate to next (infinite)
-            currentIndex++;
-            updateCarousel();
+            stopAutoScroll(); currentIndex++; updateCarousel(); startAutoScroll();
         }
     });
 }
